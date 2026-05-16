@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: better-auth@${{ matrix.better-auth }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor and latest. Extend with intermediate versions if regressions appear.
+        better-auth: ["1.5.0", "latest"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Active LTS. Ships with npm 11.x, which supports `min-release-age`.
+          # Our code is pure TS → ES2022 with no Node-version-specific APIs;
+          # matrixing across Node versions wouldn't catch anything real.
+          node-version: "24"
+
+      - name: Install (pinned better-auth@${{ matrix.better-auth }})
+        run: |
+          npm install --legacy-peer-deps
+          npm install better-auth@${{ matrix.better-auth }} --save-dev --legacy-peer-deps --no-save
+
+      - name: Show resolved better-auth version
+        # Read via fs to bypass package resolution entirely — better-auth's
+        # `exports` field doesn't expose `./package.json`, which Node 24
+        # enforces strictly.
+        run: node -p "JSON.parse(require('fs').readFileSync('node_modules/better-auth/package.json', 'utf8')).version"
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

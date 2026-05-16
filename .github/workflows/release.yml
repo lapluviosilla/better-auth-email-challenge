@@ -1,0 +1,56 @@
+name: Release
+
+# Publishes to npm whenever a tag matching `v*` is pushed.
+# Uses npm trusted publishing (OIDC) — no NPM_TOKEN secret required.
+# Configure the trusted publisher at:
+#   https://www.npmjs.com/package/<name>/access → "Trusted Publishers"
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    environment: release # the env you configured as the trusted publisher
+
+    permissions:
+      contents: read
+      id-token: write # required for OIDC → npm provenance
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Active LTS. Ships with npm 11.x for min-release-age + trusted publishing.
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Verify tag matches package version
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
