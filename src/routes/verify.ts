@@ -340,6 +340,18 @@ export const verifyEmailChallengePost = (
       method: "POST",
       body: verifyBodySchema,
       metadata: {
+        // Accept HTML form posts as a first-class transport. The cross-device
+        // "Confirm sign-in" page is documented as working without JavaScript
+        // (strict CSP, JS disabled, older browsers) — a plain
+        // `<form method="POST">` sends `application/x-www-form-urlencoded`,
+        // not JSON. better-call's getBody normalizes form bodies into a
+        // plain object before zod validation, so the `{ token }` schema
+        // applies uniformly. Matches the content-type surface of
+        // better-auth's own /sign-in and /sign-up endpoints.
+        allowedMediaTypes: [
+          "application/json",
+          "application/x-www-form-urlencoded",
+        ],
         openapi: {
           description:
             "Approve a pending email challenge. The originating browser completes the session via /email-challenge/poll on its next tick. Disabled when crossDevice: false.",

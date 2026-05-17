@@ -450,6 +450,37 @@ describe("email-challenge: uniform approve errors", () => {
     expect(b.body.code).toBe("INVALID_TOKEN");
   });
 
+  it("POST accepts application/x-www-form-urlencoded (no-JS HTML form path)", async () => {
+    // The README documents that the confirmation page works as a plain
+    // <form method="POST">, which sends form-encoded, not JSON. Regression
+    // guard: the endpoint must accept the form-encoded body and flip the
+    // challenge to `approved`.
+    const h = await buildHarness();
+    const browserHeaders = new Headers();
+    const start = await startChallenge(h, h.testUser.email, browserHeaders);
+    const challengeId = start.body.challengeId;
+    const token = h.tokenFromLastEmail();
+
+    const formHeaders = new Headers();
+    formHeaders.set("content-type", "application/x-www-form-urlencoded");
+    const approve = await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      headers: formHeaders,
+      body: new URLSearchParams({ token }).toString(),
+    });
+
+    expect(approve.res.status).toBe(200);
+    expect(approve.body.status).toBe("approved");
+
+    // DB row must reflect the transition — proves the form body was actually
+    // parsed and the same code path executed as the JSON case.
+    const row = await h.db.findOne({
+      model: "emailChallenge",
+      where: [{ field: "id", value: challengeId }],
+    });
+    expect((row as any).status).toBe("approved");
+  });
+
   it("repeated POST approve for an already-approved challenge is idempotent", async () => {
     const h = await buildHarness();
     const browserHeaders = new Headers();

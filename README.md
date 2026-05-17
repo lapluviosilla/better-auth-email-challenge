@@ -349,7 +349,9 @@ export default function ConfirmSignIn() {
 }
 ```
 
-The form `POST`s directly to the plugin via a plain HTML form — **no JS required to submit.** Works under strict CSP, with JS disabled, in older browsers.
+The form `POST`s directly to the plugin via a plain HTML form — **no JS required to submit.** Works under strict CSP, with JS disabled, in older browsers. The verify endpoint accepts both `application/x-www-form-urlencoded` (what a `<form>` sends) and `application/json` (what `authClient.emailChallenge.verify({ token })` sends) on the same path, so the cross-device flow works either way out of the box.
+
+> CSRF: better-auth's `originCheckMiddleware` runs globally on every non-GET request and validates `Origin`/`Referer` against `trustedOrigins`, blocking form posts from third-party origins. Combined with the HMAC-signed challenge cookie that only the originating browser holds, this is sufficient CSRF protection for the cross-device flow — no extra token plumbing required.
 
 ### Inline HTML override
 
