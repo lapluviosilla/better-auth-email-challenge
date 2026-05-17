@@ -2,7 +2,7 @@
 
 A [Better Auth](https://better-auth.com) plugin implementing a single passwordless **email challenge** authentication primitive: one challenge, two completion paths (clickable approval link **or** OTP), safe for same-device _and_ cross-device sign-in.
 
-> **Status: pre-1.0.** The API is stable enough that we'd ship it in production today, but minor versions may still adjust option shapes. Pin a version in your `package.json` and read the CHANGELOG before bumping.
+> **Status: pre-1.0.** The API is stable enough that we'd ship it in production today, but minor versions may still adjust option shapes. Pin a version in your `package.json` and read the CHANGELOG before bumping. We are currently using it in one production application.
 
 > This plugin is **not** `magic-link` + `email-otp` glued together. It introduces a single underlying challenge that the email proves ownership of, while session issuance stays bound to the originating browser. That separation is what makes the cross-device flow safe.
 
