@@ -450,12 +450,14 @@ describe("email-challenge: uniform approve errors", () => {
     expect(b.body.code).toBe("INVALID_TOKEN");
   });
 
-  it("POST accepts application/x-www-form-urlencoded (no-JS HTML form path)", async () => {
-    // The README documents that the confirmation page works as a plain
-    // <form method="POST">, which sends form-encoded, not JSON. Regression
-    // guard: the endpoint must accept the form-encoded body and flip the
-    // challenge to `approved`.
-    const h = await buildHarness();
+  // The README documents that the confirmation page works as a plain
+  // <form method="POST">, which sends form-encoded, not JSON, AND navigates
+  // the browser to the response. The endpoint must (a) accept the form
+  // body and (b) return a 302 so the user never sees raw JSON. JS clients
+  // that explicitly accept JSON still get the JSON contract.
+
+  it("POST form-encoded + Accept: text/html → 302 to approvalPageURL with token", async () => {
+    const h = await buildHarness({ approvalPageURL: "/auth/confirm" });
     const browserHeaders = new Headers();
     const start = await startChallenge(h, h.testUser.email, browserHeaders);
     const challengeId = start.body.challengeId;
@@ -463,6 +465,37 @@ describe("email-challenge: uniform approve errors", () => {
 
     const formHeaders = new Headers();
     formHeaders.set("content-type", "application/x-www-form-urlencoded");
+    formHeaders.set("accept", "text/html");
+    const approve = await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      headers: formHeaders,
+      body: new URLSearchParams({ token }).toString(),
+      redirect: "manual" as any,
+    });
+
+    expect(approve.res.status).toBe(302);
+    const location = new URL(approve.res.headers.get("location")!);
+    expect(location.pathname).toBe("/auth/confirm");
+    expect(location.searchParams.get("token")).toBe(token);
+
+    // State did flip — the redirect happens AFTER the CAS, not instead of it.
+    // (The GET-renders / POST-mutates invariant: state changes only on POST.)
+    const row = await h.db.findOne({
+      model: "emailChallenge",
+      where: [{ field: "id", value: challengeId }],
+    });
+    expect((row as any).status).toBe("approved");
+  });
+
+  it("POST form-encoded + Accept: application/json → 200 JSON (JS-client override)", async () => {
+    const h = await buildHarness({ approvalPageURL: "/auth/confirm" });
+    const browserHeaders = new Headers();
+    await startChallenge(h, h.testUser.email, browserHeaders);
+    const token = h.tokenFromLastEmail();
+
+    const formHeaders = new Headers();
+    formHeaders.set("content-type", "application/x-www-form-urlencoded");
+    formHeaders.set("accept", "application/json");
     const approve = await h.fetchAuth("/email-challenge/verify", {
       method: "POST",
       headers: formHeaders,
@@ -471,14 +504,73 @@ describe("email-challenge: uniform approve errors", () => {
 
     expect(approve.res.status).toBe(200);
     expect(approve.body.status).toBe("approved");
+  });
 
-    // DB row must reflect the transition — proves the form body was actually
-    // parsed and the same code path executed as the JSON case.
-    const row = await h.db.findOne({
-      model: "emailChallenge",
-      where: [{ field: "id", value: challengeId }],
+  it("POST form-encoded with no Accept (curl */* default) → treat as browser, redirect", async () => {
+    const h = await buildHarness({ approvalPageURL: "/auth/confirm" });
+    const browserHeaders = new Headers();
+    await startChallenge(h, h.testUser.email, browserHeaders);
+    const token = h.tokenFromLastEmail();
+
+    const formHeaders = new Headers();
+    formHeaders.set("content-type", "application/x-www-form-urlencoded");
+    const approve = await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      headers: formHeaders,
+      body: new URLSearchParams({ token }).toString(),
+      redirect: "manual" as any,
     });
-    expect((row as any).status).toBe("approved");
+
+    expect(approve.res.status).toBe(302);
+    expect(approve.res.headers.get("location")).toContain("/auth/confirm");
+  });
+
+  it("POST form-encoded without approvalPageURL → 200 built-in 'approved' HTML page", async () => {
+    const h = await buildHarness();
+    const browserHeaders = new Headers();
+    await startChallenge(h, h.testUser.email, browserHeaders);
+    const token = h.tokenFromLastEmail();
+
+    const formHeaders = new Headers();
+    formHeaders.set("content-type", "application/x-www-form-urlencoded");
+    formHeaders.set("accept", "text/html");
+    const approve = await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      headers: formHeaders,
+      body: new URLSearchParams({ token }).toString(),
+    });
+
+    expect(approve.res.status).toBe(200);
+    expect(approve.res.headers.get("content-type")).toContain("text/html");
+    expect(approve.text).toContain("Sign-in approved");
+  });
+
+  it("POST form-encoded idempotent re-post on approved still redirects (not JSON)", async () => {
+    // The idempotent path goes through the same approvedResponse() helper,
+    // so a re-post by a browser must also redirect — never raw JSON.
+    const h = await buildHarness({ approvalPageURL: "/auth/confirm" });
+    const browserHeaders = new Headers();
+    await startChallenge(h, h.testUser.email, browserHeaders);
+    const token = h.tokenFromLastEmail();
+
+    // First POST: JSON client, locks in the approved state.
+    const first = await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    expect(first.body.status).toBe("approved");
+
+    // Second POST: browser form. Must redirect, not return JSON.
+    const formHeaders = new Headers();
+    formHeaders.set("content-type", "application/x-www-form-urlencoded");
+    const second = await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      headers: formHeaders,
+      body: new URLSearchParams({ token }).toString(),
+      redirect: "manual" as any,
+    });
+    expect(second.res.status).toBe(302);
+    expect(second.res.headers.get("location")).toContain("/auth/confirm");
   });
 
   it("repeated POST approve for an already-approved challenge is idempotent", async () => {

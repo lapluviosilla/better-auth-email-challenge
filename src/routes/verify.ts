@@ -331,8 +331,37 @@ export const verifyEmailChallengeGet = (
  * the click response itself), so this endpoint returns
  * `CROSS_DEVICE_DISABLED` in those modes.
  */
+/**
+ * Decide whether the caller wants an HTML response (browser <form> nav)
+ * versus a JSON response (JS client / API caller).
+ *
+ *   - `Accept: application/json` is the unambiguous JS-client signal — even
+ *     if a form body happens to be present, return JSON.
+ *   - A form / multipart content-type means a plain `<form method="POST">`
+ *     submission; return HTML/redirect so the browser navigates to a real
+ *     page instead of showing raw `{"status":"approved"}`.
+ *   - Explicit `Accept: text/html` also opts into HTML.
+ *   - Otherwise (JSON body, no Accept) keep the JSON contract — that's
+ *     what the better-auth client and curl-with-json send by default.
+ */
+const wantsHtmlResponse = (request: Request | undefined): boolean => {
+  if (!request) return false;
+  const accept = (request.headers.get("accept") ?? "").toLowerCase();
+  if (accept.includes("application/json")) return false;
+  const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+  if (
+    contentType.includes("application/x-www-form-urlencoded") ||
+    contentType.includes("multipart/form-data")
+  )
+    return true;
+  return accept.includes("text/html");
+};
+
 export const verifyEmailChallengePost = (
-  opts: Pick<EmailChallengeOptions, "linkMode">,
+  opts: Pick<
+    EmailChallengeOptions,
+    "linkMode" | "approvalPageURL" | "renderApprovalPage"
+  >,
 ) =>
   createAuthEndpoint(
     "/email-challenge/verify",
@@ -346,15 +375,16 @@ export const verifyEmailChallengePost = (
         // `<form method="POST">` sends `application/x-www-form-urlencoded`,
         // not JSON. better-call's getBody normalizes form bodies into a
         // plain object before zod validation, so the `{ token }` schema
-        // applies uniformly. Matches the content-type surface of
-        // better-auth's own /sign-in and /sign-up endpoints.
+        // applies uniformly. Multipart is included for completeness — same
+        // parser path, no extra logic needed.
         allowedMediaTypes: [
           "application/json",
           "application/x-www-form-urlencoded",
+          "multipart/form-data",
         ],
         openapi: {
           description:
-            "Approve a pending email challenge. The originating browser completes the session via /email-challenge/poll on its next tick. Disabled when crossDevice: false.",
+            "Approve a pending email challenge. Returns `{ status: 'approved' }` to JSON clients; 302-redirects browser form posts to the approval page (so users don't see raw JSON). The originating browser completes the session via /email-challenge/poll on its next tick. Disabled when crossDevice: false.",
         },
       },
     },
@@ -369,8 +399,47 @@ export const verifyEmailChallengePost = (
         throw apiError("BAD_REQUEST", E.INVALID_TOKEN);
       }
 
+      // Single approved-response path so the happy path, the idempotent
+      // re-post, and the CAS-loss-but-already-approved case all return
+      // identically to the caller. The redirect / inline-HTML choice
+      // mirrors what GET /verify shows for an already-approved token,
+      // keeping the "consumer-hosted approval page" experience consistent
+      // across GET and POST.
+      const approvedResponse = async () => {
+        if (!wantsHtmlResponse(ctx.request)) {
+          return ctx.json({ status: "approved" as const });
+        }
+        if (opts.approvalPageURL) {
+          if (!isApprovalPageTrusted(ctx, opts.approvalPageURL)) {
+            throw apiError("BAD_REQUEST", E.INVALID_CALLBACK_URL);
+          }
+          throw ctx.redirect(
+            buildRedirectURL(
+              opts.approvalPageURL,
+              ctx.context.baseURL,
+              ctx.body.token,
+            ),
+          );
+        }
+        if (opts.renderApprovalPage) {
+          const html = await opts.renderApprovalPage({
+            state: "approved",
+            token: ctx.body.token,
+            postURL: computeVerifyPostURL(ctx.context.baseURL),
+            challenge: {
+              email: record.email,
+              ipAddress: record.ipAddress ?? null,
+              userAgent: record.userAgent ?? null,
+              expiresAt: new Date(record.expiresAt),
+            },
+          });
+          return htmlResponse(html);
+        }
+        return htmlResponse(renderAutoApprovedPage());
+      };
+
       if (record.status === "approved") {
-        return ctx.json({ status: "approved" as const });
+        return approvedResponse();
       }
 
       if (record.status !== "pending") {
@@ -386,11 +455,11 @@ export const verifyEmailChallengePost = (
           where: [{ field: "id", value: record.id }],
         });
         if (after?.status === "approved") {
-          return ctx.json({ status: "approved" as const });
+          return approvedResponse();
         }
         throw apiError("BAD_REQUEST", E.INVALID_TOKEN);
       }
 
-      return ctx.json({ status: "approved" as const });
+      return approvedResponse();
     },
   );
