@@ -1,6 +1,6 @@
 {
   "name": "better-auth-email-challenge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Email-bound authentication challenge plugin for Better Auth. One challenge, multiple completion methods (approval link or OTP), with browser-bound session issuance for safe cross-device sign-in.",
   "license": "MIT",
   "author": "Paul Strong (https://github.com/lapluviosilla)",

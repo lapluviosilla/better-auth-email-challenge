@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-05-17
+
+### Fixed
+
+- `POST /email-challenge/verify` now accepts `application/x-www-form-urlencoded` and `multipart/form-data` bodies, fixing `UNSUPPORTED_MEDIA_TYPE` errors from plain HTML `<form method="POST">` submissions.
+- `POST /email-challenge/verify` now redirects HTML clients instead of returning raw JSON:
+  - When `approvalPageURL` is set: `302 → ${approvalPageURL}?token=<token>`
+  - Otherwise: serves `renderApprovalPage({ state: "approved" })` or the built-in "Sign-in approved" HTML page.
+  - JS clients sending `Accept: application/json` still receive the existing JSON contract unchanged.
+
 ## [0.1.1] - 2026-05-17
 
 - No runtime changes.
