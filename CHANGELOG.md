@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-05-18
+
+### Fixed
+
+- `authClient.emailChallenge.poll()` no longer fires `$sessionSignal` on every poll. The auto-generated client proxy fires the signal on every 2xx, which caused every `useSession()` subscriber to refetch `/get-session` on each pending-poll tick. The client plugin now wraps `poll()` via `getActions` and fires `$sessionSignal` only when the response body carries `status === "completed"`. Honors a `disableSignal: true` opt-out and defers the notify by 10ms to match better-auth's internal race-avoidance.
+
+### Changed
+
+- Bumped `vitest` dev dependency to `^4.0.0` to clear transitive audit vulnerabilities.
+
 ## [0.1.2] - 2026-05-17
 
 ### Fixed
