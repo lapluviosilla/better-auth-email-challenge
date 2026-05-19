@@ -119,6 +119,84 @@ describe("email-challenge: same-device OTP flow", () => {
   });
 });
 
+describe("email-challenge: client-side $sessionSignal firing", () => {
+  it("fires $sessionSignal exactly once across multiple polls — only on completed", async () => {
+    const h = await buildHarness();
+    const browserHeaders = new Headers();
+    await startChallenge(h, h.testUser.email, browserHeaders);
+
+    let fires = 0;
+    // $store.listen subscribes to the atom; nanostores fires it once on
+    // subscribe with the current value, then again on each set(). Skip the
+    // initial-subscribe fire by tracking from after subscribe.
+    const signal = (h.client as any).$store.atoms.$sessionSignal as {
+      subscribe: (cb: () => void) => () => void;
+    };
+    const stop = signal.subscribe(() => {
+      fires++;
+    });
+    const baseline = fires;
+
+    // 3 pending polls — must not fire the signal.
+    for (let i = 0; i < 3; i++) {
+      const res = await h.client.emailChallenge.poll({
+        headers: browserHeaders,
+      });
+      expect(res.data?.status).toBe("pending");
+    }
+    expect(fires - baseline).toBe(0);
+
+    // Approve from another device → next poll completes → signal fires once.
+    const token = h.tokenFromLastEmail();
+    await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    const completed = await h.client.emailChallenge.poll({
+      headers: browserHeaders,
+    });
+    expect(completed.data?.status).toBe("completed");
+
+    // The wrapper defers the notify by 10ms to mirror the proxy's
+    // race-avoidance (proxy.mjs:60-66). Wait it out before asserting.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fires - baseline).toBe(1);
+
+    stop();
+  });
+
+  it("disableSignal opt-out skips $sessionSignal even on completed", async () => {
+    const h = await buildHarness();
+    const browserHeaders = new Headers();
+    await startChallenge(h, h.testUser.email, browserHeaders);
+
+    let fires = 0;
+    const signal = (h.client as any).$store.atoms.$sessionSignal as {
+      subscribe: (cb: () => void) => () => void;
+    };
+    const stop = signal.subscribe(() => {
+      fires++;
+    });
+    const baseline = fires;
+
+    const token = h.tokenFromLastEmail();
+    await h.fetchAuth("/email-challenge/verify", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    const completed = await h.client.emailChallenge.poll({
+      headers: browserHeaders,
+      disableSignal: true,
+    });
+    expect(completed.data?.status).toBe("completed");
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fires - baseline).toBe(0);
+
+    stop();
+  });
+});
+
 describe("email-challenge: cross-device approval + poll", () => {
   it("browser polls pending → POST approves on another device → next poll completes", async () => {
     const h = await buildHarness();
