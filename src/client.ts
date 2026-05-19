@@ -30,7 +30,10 @@ export const emailChallengeClient = () =>
           const res = await $fetch<{
             status: "pending" | "completed" | "expired";
           }>("/email-challenge/poll", { method: "GET", ...fetchOptions });
-          if (res.data?.status === "completed" && !fetchOptions?.disableSignal) {
+          if (
+            res.data?.status === "completed" &&
+            !fetchOptions?.disableSignal
+          ) {
             // Defer to match the proxy's race-avoidance (proxy.mjs:60-66).
             setTimeout(() => $store.notify("$sessionSignal"), 10);
           }
